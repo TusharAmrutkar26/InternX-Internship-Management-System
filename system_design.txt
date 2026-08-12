@@ -1,0 +1,14 @@
+#This is File By Som Chitte
+
+## Let's work on system design first
+
+- Pages Required
+-- Student Sign Up
+-- College Sign Up
+-- Company Sign Up
+-- Student Login
+-- College Login
+-- Company Login
+-- Student Dashboard
+-- College Dashboard
+-- Verification Page
