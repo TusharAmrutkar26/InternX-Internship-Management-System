@@ -1,0 +1,1 @@
+"""InternX FastAPI application package."""
