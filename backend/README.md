@@ -47,3 +47,32 @@ All Student endpoints require a logged-in Student cookie (or `Authorization: Bea
 - `PUT /api/industry/applications/:applicationId/evaluation`
 - `POST /api/industry/applications/:applicationId/certificate` (selected applications only)
 - `GET /api/public/certificates/:code` (public verification)
+
+## Prisma / PostgreSQL (optional migration)
+
+This repository currently uses SQLite for quick local development. For the hackathon deployment we recommend migrating to PostgreSQL using Prisma. A starter `prisma/schema.prisma` is provided at `backend/prisma/schema.prisma`.
+
+Quick steps to migrate to Postgres + Prisma:
+
+1. Install Prisma and client:
+
+```bash
+cd backend
+npm install prisma @prisma/client --save-dev
+npx prisma generate
+```
+
+2. Set `DATABASE_URL` in `.env` to a Postgres connection string.
+
+3. Run migrations after reviewing the schema:
+
+```bash
+npx prisma migrate dev --name init
+```
+
+4. Port seed logic from `scripts/seed.js` to use `@prisma/client` or run custom SQL. Keep backups of existing `data/internx.db` if migrating from SQLite.
+
+Notes:
+- The Prisma schema models map to the core entities required by the project (users, students, companies, internships, applications, certificates, etc.).
+- After migrating, update `src/database.js` or replace it with a Prisma-based data layer.
+
