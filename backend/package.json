@@ -7,17 +7,20 @@
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
     "test": "node --test",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
     "seed": "node scripts/seed.js",
     "reset-db": "node scripts/reset-database.js --confirm"
   },
   "dependencies": {
+    "@prisma/client": "^5.16.0",
     "bcryptjs": "^3.0.3",
-    "better-sqlite3": "^12.4.1",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
+    "prisma": "^5.16.0",
     "zod": "^4.1.12"
   }
 }
