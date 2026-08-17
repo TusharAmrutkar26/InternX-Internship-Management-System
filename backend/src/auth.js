@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken'
 import { config } from './config.js'
+import { generateStudentId } from './database.js'
 
 const cookieOptions = {
   httpOnly: true,

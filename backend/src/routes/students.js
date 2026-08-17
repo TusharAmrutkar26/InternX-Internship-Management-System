@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { z } from 'zod'
-import { db } from '../database.js'
+import { db, ensureStudentProfileId, isValidApplicationTransition } from '../database.js'
 import { authenticate, authorize } from '../middleware/authenticate.js'
 
 const router = Router()
@@ -74,12 +74,13 @@ const internshipSelect = `
 `
 
 router.get('/profile', (request, response) => {
+  const studentId = ensureStudentProfileId(request.user.id)
   const row = db.prepare(`
     SELECT u.id, u.name, u.email, sp.student_id, sp.phone, sp.college_name, sp.course,
            sp.graduation_year, sp.skills, sp.bio, sp.resume_url, sp.updated_at
     FROM users u JOIN student_profiles sp ON sp.user_id = u.id WHERE u.id = ?
   `).get(request.user.id)
-  response.json({ profile: toProfile(row) })
+  response.json({ profile: toProfile({ ...row, student_id: studentId || row?.student_id }) })
 })
 
 router.patch('/profile', (request, response, next) => {
@@ -97,6 +98,8 @@ router.patch('/profile', (request, response, next) => {
         }
         db.prepare("UPDATE users SET name = ?, email = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(name, email, request.user.id)
       }
+
+      ensureStudentProfileId(request.user.id)
 
       const fields = {
         student_id: input.studentId,
@@ -158,12 +161,13 @@ router.post('/internships/:internshipId/applications', (request, response, next)
   try {
     const internshipId = idSchema.parse(request.params.internshipId)
     const { coverLetter } = applicationSchema.parse(request.body)
-    const student = db.prepare('SELECT id FROM student_profiles WHERE user_id = ?').get(request.user.id)
+    const student = db.prepare('SELECT id, student_id FROM student_profiles WHERE user_id = ?').get(request.user.id)
     const internship = db.prepare("SELECT id FROM internships WHERE id = ? AND status = 'PUBLISHED'").get(internshipId)
     if (!internship) return response.status(404).json({ message: 'Internship not found or is not available.' })
+    if (!student || !student.student_id) return response.status(400).json({ message: 'Student profile is missing a permanent student ID.' })
     const existing = db.prepare('SELECT id FROM applications WHERE internship_id = ? AND student_id = ?').get(internshipId, student.id)
     if (existing) return response.status(409).json({ message: 'You have already applied for this internship.' })
-    const result = db.prepare('INSERT INTO applications (internship_id, student_id, cover_letter) VALUES (?, ?, ?)').run(internshipId, student.id, coverLetter)
+    const result = db.prepare('INSERT INTO applications (internship_id, student_id, cover_letter, status, offer_status, completion_status) VALUES (?, ?, ?, ?, ?, ?)').run(internshipId, student.id, coverLetter, 'PENDING', 'NONE', 'NOT_STARTED')
     return response.status(201).json({
       message: 'Application submitted successfully.',
       application: { id: Number(result.lastInsertRowid), internshipId, status: 'PENDING', coverLetter },
@@ -205,6 +209,6 @@ router.get('/applications', (request, response) => {
   })), count: rows.length })
 })
 
-router.patch('/applications/:applicationId/offer', (request,response,next)=>{try{const applicationId=idSchema.parse(request.params.applicationId);const {accept}=z.object({accept:z.boolean()}).parse(request.body);const student=db.prepare('SELECT id FROM student_profiles WHERE user_id=?').get(request.user.id);const r=db.prepare("UPDATE applications SET offer_status=?,completion_status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND student_id=? AND offer_status='OFFERED'").run(accept?'ACCEPTED':'DECLINED',accept?'IN_PROGRESS':'NOT_STARTED',applicationId,student.id);if(!r.changes)return response.status(400).json({message:'There is no pending offer for this application.'});response.json({message:accept?'Offer accepted.':'Offer declined.'})}catch(e){next(e)}})
+router.patch('/applications/:applicationId/offer', (request,response,next)=>{try{const applicationId=idSchema.parse(request.params.applicationId);const {accept}=z.object({accept:z.boolean()}).parse(request.body);const student=db.prepare('SELECT id FROM student_profiles WHERE user_id=?').get(request.user.id);const current=db.prepare('SELECT status, offer_status FROM applications WHERE id=? AND student_id=?').get(applicationId,student.id);if(!current) return response.status(404).json({message:'Application not found.'});if(current.offer_status !== 'OFFERED') return response.status(400).json({message:'This application has no active offer to accept or decline.'});if (accept && current.status !== 'OFFERED') return response.status(400).json({message:'Invalid application state. Offer can be accepted only for an offered application.'});const nextStatus = accept ? 'ACCEPTED' : 'REJECTED';const valid = isValidApplicationTransition(current.status, nextStatus) || (accept && current.status === 'OFFERED');if(!valid) return response.status(400).json({message:'This application cannot be accepted in its current state.'});const r=db.prepare("UPDATE applications SET status=?, offer_status=?, completion_status=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND student_id=?").run(accept ? 'ACCEPTED' : 'REJECTED', accept ? 'ACCEPTED' : 'DECLINED', accept ? 'IN_PROGRESS' : 'NOT_STARTED', applicationId, student.id);if(!r.changes)return response.status(400).json({message:'There is no pending offer for this application.'});response.json({message:accept?'Offer accepted.':'Offer declined.'})}catch(e){next(e)}})
 
 export default router

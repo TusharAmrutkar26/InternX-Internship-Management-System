@@ -11,9 +11,57 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const dataDirectory = path.resolve(__dirname, '..', 'data')
 fs.mkdirSync(dataDirectory, { recursive: true })
 
-export const db = new Database(path.join(dataDirectory, 'internx.db'))
+const databasePath = process.env.INTERNX_DB_PATH || path.join(dataDirectory, 'internx.db')
+export const db = new Database(databasePath)
 db.pragma('foreign_keys = ON')
 db.pragma('journal_mode = WAL')
+
+export const APPLICATION_STATUS_TRANSITIONS = Object.freeze({
+  PENDING: ['SHORTLISTED', 'REJECTED'],
+  SHORTLISTED: ['SELECTED', 'REJECTED'],
+  SELECTED: ['OFFERED', 'REJECTED'],
+  OFFERED: ['ACCEPTED', 'REJECTED'],
+  ACCEPTED: ['IN_PROGRESS', 'REJECTED'],
+  IN_PROGRESS: ['COMPLETED'],
+  COMPLETED: [],
+  REJECTED: [],
+})
+
+export function generateStudentId() {
+  const year = new Date().getFullYear()
+  const rows = db.prepare('SELECT student_id FROM student_profiles WHERE student_id LIKE ?').all(`SVKM-DS-${year}-%`)
+  let maxNumber = 0
+
+  for (const row of rows) {
+    const match = String(row.student_id || '').match(/^SVKM-DS-\d{4}-(\d{4})$/)
+    if (match) {
+      const nextValue = Number(match[1])
+      if (Number.isFinite(nextValue) && nextValue > maxNumber) maxNumber = nextValue
+    }
+  }
+
+  return `SVKM-DS-${year}-${String(maxNumber + 1).padStart(4, '0')}`
+}
+
+export function ensureStudentProfileId(userId) {
+  const profile = db.prepare('SELECT id, student_id FROM student_profiles WHERE user_id = ?').get(userId)
+  if (!profile) return null
+  if (!profile.student_id || !/^SVKM-DS-\d{4}-\d{4}$/.test(profile.student_id)) {
+    const generated = generateStudentId()
+    const current = db.prepare('SELECT id FROM student_profiles WHERE student_id = ?').get(generated)
+    if (current && current.id !== profile.id) {
+      return ensureStudentProfileId(userId)
+    }
+    db.prepare('UPDATE student_profiles SET student_id = ? WHERE id = ?').run(generated, profile.id)
+    return generated
+  }
+  return profile.student_id
+}
+
+export function isValidApplicationTransition(currentStatus, nextStatus) {
+  if (!currentStatus || !nextStatus) return false
+  return APPLICATION_STATUS_TRANSITIONS[currentStatus]?.includes(nextStatus) ?? false
+}
 
 export async function initializeDatabase() {
   db.exec(`
@@ -83,9 +131,16 @@ export async function initializeDatabase() {
       internship_id INTEGER NOT NULL,
       student_id INTEGER NOT NULL,
       cover_letter TEXT NOT NULL DEFAULT '',
-      status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING', 'SHORTLISTED', 'REJECTED', 'SELECTED')),
+      status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING', 'SHORTLISTED', 'REJECTED', 'SELECTED', 'OFFERED', 'ACCEPTED', 'IN_PROGRESS', 'COMPLETED')),
       applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      interview_at TEXT,
+      interview_notes TEXT NOT NULL DEFAULT '',
+      interview_result TEXT NOT NULL DEFAULT 'PENDING' CHECK(interview_result IN ('PENDING', 'PASSED', 'FAILED', 'NO_SHOW', 'RESCHEDULED')),
+      interview_result_notes TEXT NOT NULL DEFAULT '',
+      offer_details TEXT NOT NULL DEFAULT '',
+      offer_status TEXT NOT NULL DEFAULT 'NONE' CHECK(offer_status IN ('NONE','OFFERED','ACCEPTED','DECLINED')),
+      completion_status TEXT NOT NULL DEFAULT 'NOT_STARTED' CHECK(completion_status IN ('NOT_STARTED','IN_PROGRESS','COMPLETED')),
       UNIQUE(internship_id, student_id),
       FOREIGN KEY (internship_id) REFERENCES internships(id) ON DELETE CASCADE,
       FOREIGN KEY (student_id) REFERENCES student_profiles(id) ON DELETE CASCADE
@@ -188,9 +243,82 @@ export async function initializeDatabase() {
   addColumn('internships', 'eligibility_criteria', "eligibility_criteria TEXT NOT NULL DEFAULT ''")
   addColumn('applications', 'interview_at', 'interview_at TEXT')
   addColumn('applications', 'interview_notes', "interview_notes TEXT NOT NULL DEFAULT ''")
+  addColumn('applications', 'interview_result', "interview_result TEXT NOT NULL DEFAULT 'PENDING'")
+  addColumn('applications', 'interview_result_notes', "interview_result_notes TEXT NOT NULL DEFAULT ''")
   addColumn('applications', 'offer_details', "offer_details TEXT NOT NULL DEFAULT ''")
   addColumn('applications', 'offer_status', "offer_status TEXT NOT NULL DEFAULT 'NONE'")
   addColumn('applications', 'completion_status', "completion_status TEXT NOT NULL DEFAULT 'NOT_STARTED'")
+
+  db.exec('DROP TABLE IF EXISTS applications_legacy')
+
+  const applicationSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'applications'").get()?.sql || ''
+  const applicationColumns = db.prepare('PRAGMA table_info(applications)').all().map((column) => column.name)
+  const requiresApplicationRebuild = !applicationSql || !applicationSql.includes("'ACCEPTED'") || !applicationColumns.includes('interview_result') || !applicationColumns.includes('offer_status') || !applicationColumns.includes('completion_status')
+
+  if (requiresApplicationRebuild) {
+    const hasLegacyData = db.prepare('SELECT COUNT(*) AS count FROM applications').get().count > 0
+    const currentRows = hasLegacyData ? db.prepare('SELECT * FROM applications').all() : []
+    db.exec(`
+      PRAGMA foreign_keys = OFF;
+      BEGIN;
+      DROP TABLE IF EXISTS applications;
+      CREATE TABLE applications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        internship_id INTEGER NOT NULL,
+        student_id INTEGER NOT NULL,
+        cover_letter TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING', 'SHORTLISTED', 'REJECTED', 'SELECTED', 'OFFERED', 'ACCEPTED', 'IN_PROGRESS', 'COMPLETED')),
+        applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        interview_at TEXT,
+        interview_notes TEXT NOT NULL DEFAULT '',
+        interview_result TEXT NOT NULL DEFAULT 'PENDING' CHECK(interview_result IN ('PENDING', 'PASSED', 'FAILED', 'NO_SHOW', 'RESCHEDULED')),
+        interview_result_notes TEXT NOT NULL DEFAULT '',
+        offer_details TEXT NOT NULL DEFAULT '',
+        offer_status TEXT NOT NULL DEFAULT 'NONE' CHECK(offer_status IN ('NONE','OFFERED','ACCEPTED','DECLINED')),
+        completion_status TEXT NOT NULL DEFAULT 'NOT_STARTED' CHECK(completion_status IN ('NOT_STARTED','IN_PROGRESS','COMPLETED')),
+        UNIQUE(internship_id, student_id),
+        FOREIGN KEY (internship_id) REFERENCES internships(id) ON DELETE CASCADE,
+        FOREIGN KEY (student_id) REFERENCES student_profiles(id) ON DELETE CASCADE
+      );
+      COMMIT;
+      PRAGMA foreign_keys = ON;
+    `)
+
+    if (currentRows.length) {
+      const insert = db.prepare(`
+        INSERT INTO applications (
+          id, internship_id, student_id, cover_letter, status, applied_at, updated_at,
+          interview_at, interview_notes, interview_result, interview_result_notes,
+          offer_details, offer_status, completion_status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      const transaction = db.transaction((rows) => {
+        for (const row of rows) {
+          insert.run(
+            row.id,
+            row.internship_id,
+            row.student_id,
+            row.cover_letter,
+            row.status,
+            row.applied_at,
+            row.updated_at,
+            row.interview_at,
+            row.interview_notes,
+            row.interview_result ?? 'PENDING',
+            row.interview_result_notes ?? '',
+            row.offer_details ?? '',
+            row.offer_status ?? 'NONE',
+            row.completion_status ?? 'NOT_STARTED'
+          )
+        }
+      })
+      transaction(currentRows)
+    }
+
+    db.exec('CREATE INDEX IF NOT EXISTS applications_student_id_idx ON applications(student_id)')
+    db.exec('CREATE INDEX IF NOT EXISTS applications_internship_id_idx ON applications(internship_id)')
+  }
 
   const existingAdmin = db.prepare('SELECT id FROM users WHERE email = ?').get(config.adminEmail)
   if (!existingAdmin) {
@@ -208,9 +336,18 @@ export async function initializeDatabase() {
     if (!db.prepare('SELECT id FROM users WHERE email=?').get(email)) {
       const passwordHash = await bcrypt.hash('Demo@123', 12)
       const result = db.prepare('INSERT INTO users (name,email,password_hash,role) VALUES (?,?,?,?)').run(name,email,passwordHash,role)
-      if (role === 'STUDENT') db.prepare('INSERT INTO student_profiles (user_id,student_id,college_name,course,graduation_year,skills,bio,phone) VALUES (?,?,?,?,?,?,?,?)').run(result.lastInsertRowid, email.startsWith('student1')?'STU-1001':'STU-1002','InternX College','Computer Science',2027,role==='STUDENT'?'React, JavaScript, SQL':'','InternX demo student','9876543210')
-      else db.prepare('INSERT INTO industry_profiles (user_id,company_name,location,description,is_verified) VALUES (?,?,?,?,1)').run(result.lastInsertRowid,email.startsWith('industry1')?'TechNova Labs':'GreenLeaf Systems',email.startsWith('industry1')?'Bengaluru':'Pune','InternX demo company')
+      if (role === 'STUDENT') {
+        const studentId = generateStudentId()
+        db.prepare('INSERT INTO student_profiles (user_id,student_id,college_name,course,graduation_year,skills,bio,phone) VALUES (?,?,?,?,?,?,?,?)').run(result.lastInsertRowid, studentId, 'InternX College', 'Computer Science', 2027, 'React, JavaScript, SQL', 'InternX demo student', '9876543210')
+      } else {
+        db.prepare('INSERT INTO industry_profiles (user_id,company_name,location,description,is_verified) VALUES (?,?,?,?,1)').run(result.lastInsertRowid, email.startsWith('industry1') ? 'TechNova Labs' : 'GreenLeaf Systems', email.startsWith('industry1') ? 'Bengaluru' : 'Pune', 'InternX demo company')
+      }
     }
+  }
+  const existingStudentProfileRows = db.prepare("SELECT id FROM student_profiles WHERE student_id IS NULL OR student_id = ''").all()
+  for (const row of existingStudentProfileRows) {
+    const generated = generateStudentId()
+    db.prepare('UPDATE student_profiles SET student_id = ? WHERE id = ?').run(generated, row.id)
   }
   if (!db.prepare('SELECT id FROM internships LIMIT 1').get()) {
     const tech = db.prepare('SELECT ip.id FROM industry_profiles ip JOIN users u ON u.id=ip.user_id WHERE u.email=?').get('industry1@internx.demo').id
@@ -218,11 +355,11 @@ export async function initializeDatabase() {
     const create = db.prepare('INSERT INTO internships (industry_id,title,description,location,work_mode,duration_weeks,stipend,skills,status) VALUES (?,?,?,?,?,?,?,?,?)')
     const internships = [[tech,'Frontend Developer Intern','Build polished React interfaces with our product team.','Bengaluru','HYBRID',12,18000,'React, JavaScript, CSS','PUBLISHED'],[tech,'Backend Node.js Intern','Help build reliable REST APIs and data services.','Remote','REMOTE',16,20000,'Node.js, Express, SQL','PUBLISHED'],[green,'Data Analyst Intern','Work with data pipelines and operational dashboards.','Pune','ONSITE',12,15000,'Python, SQL, Excel','PUBLISHED'],[green,'UX Design Intern','Design accessible workflow experiences for web products.','Remote','REMOTE',10,12000,'Figma, UX Research','PUBLISHED'],[tech,'Cloud Operations Intern','Assist with our cloud infrastructure and observability.','Bengaluru','HYBRID',14,18000,'Linux, Docker, AWS','PENDING_APPROVAL']]
     for (const row of internships) create.run(...row)
-    const studentOne=db.prepare('SELECT id FROM student_profiles sp JOIN users u ON u.id=sp.user_id WHERE u.email=?').get('student1@internx.demo').id
-    const studentTwo=db.prepare('SELECT id FROM student_profiles sp JOIN users u ON u.id=sp.user_id WHERE u.email=?').get('student2@internx.demo').id
+    const studentOne=db.prepare('SELECT sp.id FROM student_profiles sp JOIN users u ON u.id=sp.user_id WHERE u.email=?').get('student1@internx.demo').id
+    const studentTwo=db.prepare('SELECT sp.id FROM student_profiles sp JOIN users u ON u.id=sp.user_id WHERE u.email=?').get('student2@internx.demo').id
     const ids=db.prepare('SELECT id FROM internships ORDER BY id').all().map(r=>r.id)
-    db.prepare('INSERT INTO applications (internship_id,student_id,cover_letter,status) VALUES (?,?,?,?)').run(ids[0],studentOne,'Excited to contribute to TechNova.','SHORTLISTED')
-    db.prepare('INSERT INTO applications (internship_id,student_id,cover_letter,status) VALUES (?,?,?,?)').run(ids[1],studentTwo,'I enjoy backend development.','PENDING')
-    db.prepare('INSERT INTO applications (internship_id,student_id,cover_letter,status) VALUES (?,?,?,?)').run(ids[2],studentOne,'Data analysis is a core interest.','SELECTED')
+    db.prepare('INSERT INTO applications (internship_id,student_id,cover_letter,status,offer_status,completion_status) VALUES (?,?,?,?,?,?)').run(ids[0],studentOne,'Excited to contribute to TechNova.','SHORTLISTED','NONE','NOT_STARTED')
+    db.prepare('INSERT INTO applications (internship_id,student_id,cover_letter,status,offer_status,completion_status) VALUES (?,?,?,?,?,?)').run(ids[1],studentTwo,'I enjoy backend development.','PENDING','NONE','NOT_STARTED')
+    db.prepare('INSERT INTO applications (internship_id,student_id,cover_letter,status,offer_status,completion_status) VALUES (?,?,?,?,?,?)').run(ids[2],studentOne,'Data analysis is a core interest.','SELECTED','NONE','NOT_STARTED')
   }
 }

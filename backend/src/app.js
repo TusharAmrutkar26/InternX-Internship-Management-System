@@ -2,6 +2,7 @@ import express from 'express'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
 import { config } from './config.js'
+import { initializeDatabase } from './database.js'
 import authRouter from './routes/auth.js'
 import studentRouter from './routes/students.js'
 import industryRouter from './routes/industry.js'
@@ -9,6 +10,8 @@ import adminRouter from './routes/admin.js'
 import recordsRouter from './routes/records.js'
 import publicRouter from './routes/public.js'
 import { errorHandler, notFound } from './middleware/errors.js'
+
+await initializeDatabase()
 
 const app = express()
 app.use(cors({ origin: config.clientUrl, credentials: true }))

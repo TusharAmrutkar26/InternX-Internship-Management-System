@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import bcrypt from 'bcryptjs'
 import { z } from 'zod'
-import { db } from '../database.js'
+import { db, generateStudentId } from '../database.js'
 import { createToken, setAuthCookie, clearAuthCookie } from '../auth.js'
 import { authenticate } from '../middleware/authenticate.js'
 
@@ -30,8 +30,12 @@ router.post('/register', async (request, response, next) => {
     const passwordHash = await bcrypt.hash(input.password, 12)
     const createAccount = db.transaction(() => {
       const result = db.prepare('INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)').run(input.name, email, passwordHash, input.role)
-      if (input.role === 'STUDENT') db.prepare('INSERT INTO student_profiles (user_id) VALUES (?)').run(result.lastInsertRowid)
-      else db.prepare('INSERT INTO industry_profiles (user_id, company_name) VALUES (?, ?)').run(result.lastInsertRowid, input.companyName)
+      if (input.role === 'STUDENT') {
+        const studentId = generateStudentId()
+        db.prepare('INSERT INTO student_profiles (user_id, student_id) VALUES (?, ?)').run(result.lastInsertRowid, studentId)
+      } else {
+        db.prepare('INSERT INTO industry_profiles (user_id, company_name) VALUES (?, ?)').run(result.lastInsertRowid, input.companyName)
+      }
       return db.prepare('SELECT id, name, email, role, created_at FROM users WHERE id = ?').get(result.lastInsertRowid)
     })
     const user = createAccount()
