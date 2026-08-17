@@ -13,58 +13,249 @@ enum Role {
   COMPANY
 }
 
-model User {
-  id            Int      @id @default(autoincrement())
-  name          String
-  email         String   @unique
-  passwordHash  String
-  role          Role
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+enum WorkMode {
+  REMOTE
+  ONSITE
+  HYBRID
+}
 
-  studentProfile StudentProfile?
-  facultyProfile FacultyProfile?
-  companyProfile CompanyProfile?
+enum InternshipStatus {
+  DRAFT
+  OPEN
+  CLOSED
+  ACTIVE
+  COMPLETED
+}
+
+enum ApplicationStatus {
+  APPLIED
+  SHORTLISTED
+  SELECTED
+  REJECTED
+}
+
+enum CompletionStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum Proficiency {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
+enum SubmissionStatus {
+  NOT_SUBMITTED
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum CertificateStatus {
+  VALID
+  INVALID
+}
+
+model User {
+  id                 Int                  @id @default(autoincrement())
+  name               String
+  email              String               @unique
+  passwordHash       String
+  role               Role
+  isActive           Boolean              @default(true)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  studentProfile     StudentProfile?
+  facultyProfile     FacultyProfile?
+  companyProfile     CompanyProfile?
+  progressUpdates    InternshipProgress[] @relation("ProgressAuthor")
+  evaluations        Evaluation[]         @relation("EvaluationAuthor")
+  certificatesIssued Certificate[]        @relation("CertificateIssuer")
+  placementRecords   PlacementRecord[]    @relation("PlacementRecordedBy")
 }
 
 model StudentProfile {
-  id               Int      @id @default(autoincrement())
-  userId           Int      @unique
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  studentId        String?  @unique
+  id               Int               @id @default(autoincrement())
+  userId           Int               @unique
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  studentId        String            @unique
   collegeName      String?
   course           String?
   graduationYear   Int?
-  skills           String   @default("")
-  bio              String   @default("")
+  bio              String            @default("")
   phone            String?
   resumeUrl        String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  academicRecords  AcademicRecord[]
+  skills           StudentSkill[]
+  applications     Application[]
+  placementRecords PlacementRecord[]
+
+  @@index([collegeName])
 }
 
 model FacultyProfile {
-  id            Int       @id @default(autoincrement())
-  userId        Int       @unique
-  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  department    String?
-  designation   String?
-  institution   String?
-  phone         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id          Int      @id @default(autoincrement())
+  userId      Int      @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department  String?
+  designation String?
+  institution String?
+  phone       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model CompanyProfile {
-  id            Int       @id @default(autoincrement())
-  userId        Int       @unique
-  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  companyName   String?
-  website       String?
-  location      String?
-  description   String    @default("")
-  isVerified    Boolean   @default(false)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id           Int          @id @default(autoincrement())
+  userId       Int          @unique
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyName  String
+  website      String?
+  location     String?
+  description  String       @default("")
+  isVerified   Boolean      @default(false)
+  isSuspicious Boolean      @default(false)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  internships  Internship[]
+
+  @@index([isVerified, isSuspicious])
+}
+
+model Internship {
+  id                  Int              @id @default(autoincrement())
+  companyId           Int
+  company             CompanyProfile   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  title               String
+  description         String
+  location            String
+  workMode            WorkMode
+  durationWeeks       Int
+  stipend             Int?
+  requiredSkills      String           @default("")
+  eligibilityCriteria String           @default("")
+  applicationDeadline DateTime?
+  startDate           DateTime?
+  endDate             DateTime?
+  status              InternshipStatus @default(DRAFT)
+  isSuspicious        Boolean          @default(false)
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  applications        Application[]
+
+  @@index([companyId, status])
+  @@index([status, applicationDeadline])
+}
+
+model Application {
+  id                          Int                  @id @default(autoincrement())
+  internshipId                Int
+  internship                  Internship           @relation(fields: [internshipId], references: [id], onDelete: Cascade)
+  studentId                   Int
+  student                     StudentProfile       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  coverLetter                 String               @default("")
+  status                      ApplicationStatus    @default(APPLIED)
+  interviewAt                 DateTime?
+  interviewNotes              String               @default("")
+  offerDetails                String               @default("")
+  completionStatus            CompletionStatus     @default(NOT_STARTED)
+  startedAt                   DateTime?
+  completedAt                 DateTime?
+  reportUrl                   String?
+  certificateFileUrl          String?
+  certificateSubmissionStatus SubmissionStatus     @default(NOT_SUBMITTED)
+  createdAt                   DateTime             @default(now())
+  updatedAt                   DateTime             @updatedAt
+  progressUpdates             InternshipProgress[]
+  certificate                 Certificate?
+  evaluation                  Evaluation?
+
+  @@unique([internshipId, studentId])
+  @@index([studentId, status])
+  @@index([internshipId, status])
+}
+
+model AcademicRecord {
+  id            Int            @id @default(autoincrement())
+  studentId     Int
+  student       StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  institution   String
+  qualification String
+  fieldOfStudy  String?
+  startYear     Int?
+  endYear       Int?
+  grade         String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([studentId, endYear])
+}
+
+model StudentSkill {
+  id          Int            @id @default(autoincrement())
+  studentId   Int
+  student     StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  name        String
+  proficiency Proficiency    @default(BEGINNER)
+  createdAt   DateTime       @default(now())
+
+  @@unique([studentId, name])
+}
+
+model InternshipProgress {
+  id               Int         @id @default(autoincrement())
+  applicationId    Int
+  application      Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  progressPercent  Int
+  note             String      @default("")
+  recordedByUserId Int
+  recordedByUser   User        @relation("ProgressAuthor", fields: [recordedByUserId], references: [id], onDelete: Restrict)
+  recordedAt       DateTime    @default(now())
+
+  @@index([applicationId, recordedAt])
+}
+
+model Evaluation {
+  id              Int         @id @default(autoincrement())
+  applicationId   Int         @unique
+  application     Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  rating          Int
+  feedback        String
+  evaluatorUserId Int
+  evaluator       User        @relation("EvaluationAuthor", fields: [evaluatorUserId], references: [id], onDelete: Restrict)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+}
+
+model Certificate {
+  id              Int               @id @default(autoincrement())
+  certificateCode String            @unique
+  applicationId   Int               @unique
+  application     Application       @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  issuedByUserId  Int
+  issuedByUser    User              @relation("CertificateIssuer", fields: [issuedByUserId], references: [id], onDelete: Restrict)
+  title           String
+  qrPayload       String            @unique
+  status          CertificateStatus @default(VALID)
+  issuedAt        DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+}
+
+model PlacementRecord {
+  id               Int            @id @default(autoincrement())
+  studentId        Int
+  student          StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  companyName      String
+  roleTitle        String
+  placementDate    DateTime?
+  notes            String         @default("")
+  recordedByUserId Int
+  recordedByUser   User           @relation("PlacementRecordedBy", fields: [recordedByUserId], references: [id], onDelete: Restrict)
+  createdAt        DateTime       @default(now())
+
+  @@index([studentId, placementDate])
 }

@@ -1,49 +1,25 @@
 # InternX backend
 
-## Run locally
+InternX is a Node.js, Express, PostgreSQL, and Prisma REST API. It uses bcrypt password hashes, JWT bearer tokens/httpOnly cookies, and role-based access control for `STUDENT`, `FACULTY`, and `COMPANY` users.
 
-1. Copy `.env.example` to `.env` and set a long `JWT_SECRET`.
-2. Run `npm install`.
-3. Run `npm run dev`.
+## Local setup
 
-The API starts on `http://localhost:4000` and creates a persistent SQLite database at `data/internx.db` automatically. The development Admin account is seeded from `ADMIN_EMAIL` and `ADMIN_PASSWORD` (the sample values are for local development only).
+1. Copy `.env.example` to `.env` and set a real PostgreSQL `DATABASE_URL` and a long `JWT_SECRET`.
+2. Install packages with `npm install`.
+3. Generate the client: `npm run prisma:generate`.
+4. Apply migrations: `npm run prisma:migrate -- --name initial` for a new database, or `npx prisma migrate deploy` for an existing migrated environment.
+5. Seed demo data: `npm run seed`.
+6. Start the API: `npm run dev`.
 
-## Database lifecycle
+The API listens on `http://localhost:4000`. The development seed accounts are `student@internx.demo`, `faculty@internx.demo`, and `company@internx.demo`; each uses `Demo123!`.
 
-- `npm start` or `npm run dev` creates/migrates `backend/data/internx.db` automatically.
-- `npm run seed` is safe and repeatable: it only inserts missing demo accounts/data and never removes existing records.
-- `npm run reset-db` deletes only `backend/data/internx.db` and its SQLite WAL files, then a subsequent `npm run seed` (or start) creates a fresh demo database. Stop the backend before resetting.
+## Endpoint groups
 
-The database is persistent; it is not frontend state or localStorage. The `data/` directory is intentionally git-ignored because it can contain real local data.
+- `/api/auth` — student/company registration, login, logout, current user
+- `/api/students` — profiles, internship discovery, applications
+- `/api/companies` and `/api/industry` — the company portal (`/industry` remains for frontend compatibility)
+- `/api/faculty` — student monitoring, certificate/company verification, placements, analytics
+- `/api/public/certificates/:code` — database-backed public certificate verification
+- `/api/students/*` (mounted through `/api`) — academic records, skills, progress, submissions, certificates
 
-## Phase 1 endpoints
-
-- `GET /api/health`
-- `POST /api/auth/register` — accepts Student or Industry accounts
-- `POST /api/auth/login`
-- `POST /api/auth/logout`
-- `GET /api/auth/me`
-
-## Student endpoints
-
-All Student endpoints require a logged-in Student cookie (or `Authorization: Bearer <token>`).
-
-- `GET /api/students/profile`
-- `PATCH /api/students/profile`
-- `GET /api/students/internships?search=&company=&location=&skills=&workMode=`
-- `GET /api/students/internships/:internshipId`
-- `POST /api/students/internships/:internshipId/applications`
-- `GET /api/students/applications`
-
-## Academic, progress, evaluation, and certificate endpoints
-
-- `GET|POST /api/students/academic-records`
-- `PATCH|DELETE /api/students/academic-records/:recordId`
-- `GET|POST /api/students/skills`
-- `DELETE /api/students/skills/:skillId`
-- `GET /api/students/applications/:applicationId/progress`
-- `GET /api/students/certificates`
-- `POST /api/industry/applications/:applicationId/progress`
-- `PUT /api/industry/applications/:applicationId/evaluation`
-- `POST /api/industry/applications/:applicationId/certificate` (selected applications only)
-- `GET /api/public/certificates/:code` (public verification)
+All protected routes accept `Authorization: Bearer <accessToken>` or the secure `internx_token` cookie returned on login.

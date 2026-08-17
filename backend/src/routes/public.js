@@ -1,5 +1,12 @@
 import { Router } from 'express'
-import { db } from '../database.js'
-const router=Router()
-router.get('/certificates/:code',(req,res)=>{const certificate=db.prepare(`SELECT c.certificate_code,c.title,c.issued_at,u.name student_name,i.title internship_title,(SELECT verification_status FROM certificate_verifications WHERE certificate_id=c.id ORDER BY verified_at DESC,id DESC LIMIT 1) status FROM certificates c JOIN applications a ON a.id=c.application_id JOIN student_profiles sp ON sp.id=a.student_id JOIN users u ON u.id=sp.user_id JOIN internships i ON i.id=a.internship_id WHERE c.certificate_code=?`).get(req.params.code);if(!certificate)return res.status(404).json({message:'Certificate not found.'});res.json({certificate})})
+import { prisma } from '../lib/prisma.js'
+
+const router = Router()
+router.get('/certificates/:code', async (req, res, next) => {
+  try {
+    const certificate = await prisma.certificate.findUnique({ where: { certificateCode: req.params.code }, include: { application: { include: { student: { include: { user: true } }, internship: { include: { company: true } } } } } })
+    if (!certificate || certificate.status !== 'VALID') return res.status(404).json({ verification: 'INVALID', message: 'Certificate was not found or is invalid.' })
+    res.json({ verification: 'AUTHENTIC', certificate: { certificateCode: certificate.certificateCode, title: certificate.title, issuedAt: certificate.issuedAt, studentName: certificate.application.student.user.name, studentId: certificate.application.student.studentId, internshipTitle: certificate.application.internship.title, companyName: certificate.application.internship.company.companyName, qrPayload: certificate.qrPayload } })
+  } catch (error) { next(error) }
+})
 export default router
