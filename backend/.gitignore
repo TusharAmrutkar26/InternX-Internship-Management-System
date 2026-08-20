@@ -4,4 +4,6 @@ __pycache__/
 .env
 node_modules/
 data/
+*.pyc
+__pycache__/
 coverage/

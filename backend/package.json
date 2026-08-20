@@ -9,8 +9,7 @@
     "test": "node --test",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "seed": "node scripts/seed.js",
-    "reset-db": "node scripts/reset-database.js --confirm"
+    "seed": "node scripts/seed.js"
   },
   "dependencies": {
     "@prisma/client": "^5.16.0",
