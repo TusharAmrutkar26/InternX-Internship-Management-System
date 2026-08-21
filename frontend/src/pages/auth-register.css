@@ -1,0 +1,10 @@
+.simple-auth .auth-card{display:flex;flex-direction:column}
+.simple-auth .auth-card>.eyebrow{order:1}.simple-auth .auth-card>h2{order:2}.simple-auth .auth-card>.subtle{order:3}
+.simple-auth .role-picker{order:4;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;border:0;padding:0;margin:22px 0 10px}
+.simple-auth .role-picker legend{grid-column:1/-1;font-size:11px;font-weight:800;color:#56637c;padding:0}
+.simple-auth .role-picker label{margin:0;display:flex;align-items:flex-start;gap:7px;padding:11px 9px;border:1px solid #e1e6f0;border-radius:8px;color:#66738e;cursor:pointer}
+.simple-auth .role-picker label:has(input:checked){border-color:var(--indigo);background:#f4f4ff;color:var(--indigo)}
+.simple-auth .role-picker input[type=radio]{appearance:auto;padding:0;margin:3px 0 0;accent-color:var(--indigo);flex:none}
+.simple-auth .role-picker span{display:grid;gap:2px}.simple-auth .role-picker b{font-size:12px}.simple-auth .role-picker small{font-size:10px;line-height:1.3}
+.simple-auth .auth-card>label{order:5}.simple-auth .auth-card>.auth-error{order:6}.simple-auth .auth-card>.primary-btn{order:7}.simple-auth .auth-card>.back-link{order:8}
+@media(max-width:520px){.simple-auth .role-picker{grid-template-columns:1fr}.simple-auth .role-picker label{align-items:center}}
